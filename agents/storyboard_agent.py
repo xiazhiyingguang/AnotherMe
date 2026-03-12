@@ -8,6 +8,7 @@ from config import DEFAULT_LLM_CONFIG
 from langchain_core.prompts import ChatPromptTemplate
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class StoryboardAgent(BaseAgent):
@@ -152,7 +153,7 @@ class StoryboardAgent(BaseAgent):
             (
                 "system",
                 """你是一个 Manim 动画指令设计师，负责将单个视频场景的分镜描述转化为结构化的 Manim 动画指令。
-Manim 是一个 Python 数学动画库。
+Manim 是一个 Python 数学动画库。 
 
 常用对象类：Triangle、Polygon、Line、Dot、MathTex、Text、Arrow、Arc、Circle、Square、Brace、NumberPlane、DecimalNumber
 常用动画类：Create、Write、FadeIn、FadeOut、Transform、ReplacementTransform、MoveToTarget、Indicate、GrowFromCenter、DrawBorderThenFill
@@ -173,6 +174,11 @@ Manim 是一个 Python 数学动画库。
    - params: 额外参数文字描述（无则填空字符串）
 5. formula_display: 该场景展示的核心公式（LaTeX 字符串，不加 $ 包裹；无公式则填空字符串）
 6. estimated_duration: 所有 animations 的 run_time 之和（秒）
+
+**重要格式要求：**
+- 必须输出标准的 JSON 格式
+- JSON 中只能使用英文标点（逗号、冒号、引号等），不能使用中文标点
+- 字符串值中可以使用中文，但标点符号必须是英文的
 
 请严格按照以下 JSON 格式输出单个场景，不要添加任何额外内容：
 {{
@@ -210,12 +216,11 @@ Manim 是一个 Python 数学动画库。
 
         chain = prompt | self.llm
         scenes = human_storyboard.get("scenes", [])
-        manim_scenes = []
+        manim_scenes = [None] * len(scenes)
         max_retries = 3
 
-        for scene in scenes:
+        def process_scene(index: int, scene: Dict[str, Any]):
             scene_id = scene.get("scene_id", "?")
-            parsed = None
             for attempt in range(1, max_retries + 1):
                 print(f"    正在生成场景 {scene_id} 的 Manim 指令（第 {attempt} 次）...")
                 response = chain.invoke({
@@ -224,9 +229,18 @@ Manim 是一个 Python 数学动画库。
                 })
                 parsed = self._parse_json_response(response.content)
                 if "error" not in parsed:
-                    break
+                    return index, parsed
                 print(f"    ⚠️  场景 {scene_id} 第 {attempt} 次解析失败：{parsed['error']}，{'重试中...' if attempt < max_retries else '已达最大重试次数'}")
-            manim_scenes.append(parsed)
+            return index, parsed
+
+        with ThreadPoolExecutor(max_workers=len(scenes)) as executor:
+            futures = {
+                executor.submit(process_scene, i, scene): i
+                for i, scene in enumerate(scenes)
+            }
+            for future in as_completed(futures):
+                index, result = future.result()
+                manim_scenes[index] = result
 
         return {
             "total_scenes": len(manim_scenes),
@@ -240,8 +254,10 @@ Manim 是一个 Python 数学动画库。
             return {"error": "未找到 JSON 内容", "raw_content": content[:500]}
 
         json_str = json_match.group()
-        # 替换中文引号
-        json_str = json_str.replace('\u201c', '"').replace('\u201d', '"')
+        # 替换中文标点为英文标点（防止 LLM 输出中文标点导致解析失败）
+        json_str = json_str.replace('，', ',')  # 中文逗号 → 英文逗号
+        json_str = json_str.replace('：', ':')  # 中文冒号 → 英文冒号
+        json_str = json_str.replace('\u201c', '"').replace('\u201d', '"')  # 中文引号 → 英文引号
 
         try:
             return json.loads(json_str)

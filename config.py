@@ -23,6 +23,14 @@ VISION_MODEL_CONFIG = {
     "temperature": 0.05,
 }
 
+# 语音模型配置 (用于 TTS)
+VOICE_MODEL_CONFIG = {
+    "api_key": os.getenv("ARK_API_KEY"),
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "model": "doubao-seed-2-0-pro-260215",
+    "temperature": 0.05,
+}
+
 # ==================== Agent 配置 ====================
 AGENT_CONFIGS = {
     "vision": {
@@ -48,6 +56,13 @@ AGENT_CONFIGS = {
         "description": "负责生成 manim 动画代码",
         "temperature": 0.1,
         "max_tokens": 8192,
+    },
+    "voice": {
+        "name": "语音 Agent",
+        "description": "负责将分镜解说词转换为语音文件",
+        "temperature": 0.05,
+        "max_tokens": 2048,
+        "output_dir": "output/audio",
     },
     "validator": {
         "name": "验证 Agent",

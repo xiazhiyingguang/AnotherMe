@@ -7,6 +7,7 @@ from agents.reasoning_agent import ReasoningAgent
 from agents.storyboard_agent import StoryboardAgent
 from agents.animation_agent import AnimationAgent
 from agents.validator_agent import ValidatorAgent
+from agents.voice_agent import VoiceAgent
 
 # 创建各 Agent 实例
 # 视觉 Agent 负责 OCR 识别和理解题目图片
@@ -15,6 +16,8 @@ vision_agent = VisionAgent(config=AGENT_CONFIGS["vision"])
 reasoning_agent = ReasoningAgent(config=AGENT_CONFIGS["reasoning"])
 # 分镜 Agent 负责设计视频分镜和解说词
 storyboard_agent = StoryboardAgent(config=AGENT_CONFIGS["storyboard"])
+# 音频 Agent 负责将分镜解说词转换为语音文件
+voice_agent = VoiceAgent(config=AGENT_CONFIGS["voice"])
 # 动画 Agent 负责生成 manim 动画代码
 animation_agent = AnimationAgent(config=AGENT_CONFIGS["animation"])
 # 验证 Agent 负责验证解题和代码正确性
