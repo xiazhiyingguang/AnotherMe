@@ -57,25 +57,47 @@ class VoiceAgent(BaseAgent):
                 output_path = os.path.join(output_dir, f"scene_{scene_id}.mp3")
                 tasks.append((scene_id, output_path, narration))
 
-            # 带重试的单场景生成函数
-            max_retries = 2
-            async def save_with_retry(scene_id, output_path, narration):
-                for attempt in range(1, max_retries + 1):
-                    try:
-                        await edge_tts.Communicate(narration, voice="zh-CN-XiaoxiaoNeural").save(output_path)
-                        print(f"    ✓ 场景 {scene_id} 音频生成完成")
-                        return
-                    except Exception as e:
-                        print(f"    ⚠️  场景 {scene_id} 第 {attempt} 次失败：{type(e).__name__}，{'重试中...' if attempt < max_retries else '已放弃'}")
-                        if attempt < max_retries:
-                            await asyncio.sleep(2 * attempt)  # 指数退避
-                        else:
-                            raise
+            # 带重试和并发限制的单场景生成函数
+            max_retries = int(self.config.get("tts_max_retries", 4))
+            concurrency = max(1, int(self.config.get("tts_concurrency", 2)))
+            semaphore = asyncio.Semaphore(concurrency)
 
-            await asyncio.gather(*[
+            async def save_with_retry(scene_id, output_path, narration):
+                async with semaphore:
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            await edge_tts.Communicate(narration, voice="zh-CN-XiaoxiaoNeural").save(output_path)
+                            print(f"    ✓ 场景 {scene_id} 音频生成完成")
+                            return None
+                        except Exception as e:
+                            print(f"    ⚠️  场景 {scene_id} 第 {attempt} 次失败：{type(e).__name__}，{'重试中...' if attempt < max_retries else '已放弃'}")
+                            if os.path.exists(output_path):
+                                try:
+                                    os.remove(output_path)
+                                except OSError:
+                                    pass
+                            if attempt < max_retries:
+                                await asyncio.sleep(min(2 ** attempt, 8))
+                            else:
+                                return {
+                                    "scene_id": scene_id,
+                                    "error_type": type(e).__name__,
+                                    "error": str(e),
+                                }
+
+            failures = await asyncio.gather(*[
                 save_with_retry(scene_id, output_path, narration)
                 for scene_id, output_path, narration in tasks
             ])
+            failed_scenes = [item for item in failures if item is not None]
+            if failed_scenes:
+                failed_ids = [str(item["scene_id"]) for item in failed_scenes]
+                raise RuntimeError(
+                    "TTS 生成失败（可能是网络/代理导致无法连接 speech.platform.bing.com）。"
+                    f" 失败场景: {', '.join(failed_ids)}。"
+                    "请检查代理分流、VPN 或网络策略后重试。"
+                )
+
             return tasks
 
         tasks = asyncio.run(generate_all())
